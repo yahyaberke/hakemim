@@ -1,0 +1,479 @@
+<!doctype html>
+<html lang="tr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Hakem Kazanç Hesaplama</title>
+
+  <script src="https://cdn.tailwindcss.com"></script>
+
+  <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
+
+
+  <style>
+    /* küçük ek stiller */
+    body { -webkit-font-smoothing:antialiased; -moz-osx-font-smoothing:grayscale; }
+    
+    /* DEKORASYON RESİMLERİ: Sol ve Sağ Kenarlar */
+    .decor-column {
+      position: fixed;
+      top: 0;
+      height: 100%;
+      width: 150px; 
+      display: flex;
+      flex-direction: column;
+      justify-content: space-evenly; 
+      pointer-events: none;
+      z-index: 1; 
+      padding: 10px 0; 
+    }
+    .decor-column.left {
+        left: 0;
+        align-items: flex-start; 
+    }
+    .decor-column.right {
+        right: 0;
+        align-items: flex-end; 
+    }
+    .decor-column img {
+      width: 120px; 
+      height: auto;
+      opacity: .15; 
+      margin-left: 10px; 
+      margin-right: 10px;
+      display: block; 
+    }
+
+    /* MÜZİK PANELİ ÖZEL CSS */
+    .music-panel {
+      position: fixed;
+      top: 0;
+      right: 0;
+      width: 100%; 
+      max-width: 380px; 
+      height: 100%;
+      background-color: rgba(17, 24, 39, 0.95); 
+      backdrop-filter: blur(8px);
+      transform: translateX(100%);
+      transition: transform 0.3s ease-out;
+      z-index: 50; 
+      box-shadow: -6px 0 20px rgba(0,0,0,0.5);
+      padding: 1rem;
+      overflow-y: auto;
+    }
+    .music-panel.open {
+      transform: translateX(0);
+    }
+    /* Müzik butonu (açma) */
+    .music-button {
+      position: fixed;
+      top: 1rem;
+      right: 1rem;
+      z-index: 51; 
+    }
+
+    /* Kapatma tuşu için YENİ KONUM */
+    .music-panel .close-button {
+        position: absolute; 
+        top: 1rem; /* Açma butonuyla aynı hizaya getirildi */
+        right: 4.5rem; /* Sarı butonun genişliği (p-3 = ~48px) + boşluk (1rem = 16px) kadar sola kaydırıldı */
+        /* Eğer sarı butonun boyutunda değişiklik olursa bu değeri ayarlamak gerekebilir. */
+        z-index: 52; /* Açma butonunun üstünde kalmasını sağlar */
+    }
+
+
+    @media (min-width: 768px) {
+      .music-panel {
+        width: 380px;
+      }
+    }
+  </style>
+</head>
+<body class="bg-gradient-to-br from-slate-900 via-gray-900 to-black text-gray-100">
+
+  {/* Dekorasyon Resimleri - SOL TARAFA İLK 3 RESİM Eşit Dağıtıldı */}
+  <div class="decor-column left hidden md:flex">
+    <img src="image.png" alt="Referee Decor 1" />
+    <img src="image copy.png" alt="Referee Decor 2" />
+    <img src="WhatsApp Görsel 2025-10-16 saat 01.50.50_8685b3e2.jpg" alt="WhatsApp Image Decor" />
+  </div>
+
+  {/* Dekorasyon Resimleri - SAĞ TARAFA DİĞER 3 RESİM Eşit Dağıtıldı */}
+  <div class="decor-column right hidden md:flex">
+    <img src="image copy 2.png" alt="Referee Decor 4" />
+    <img src="image copy 3.png" alt="Referee Decor 5" />
+    <img src="image copy 4.png" alt="Referee Decor 6" />
+  </div>
+
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useMemo, useEffect, useRef } = React;
+
+    /**************************************************************************
+     * ÜCRETLER: PDF tablosundan rollere göre kategori ücretleri (örnek ve tam)
+     **************************************************************************/
+    const CATEGORY_ROLE_FEES = {
+      SAL: { label: "Süper / 1. ve 2. Amatör / Kadınlar 1-2-3", Hakem: 580, Yardimci: 350, Dorduncu: 335, Gozlemci: 350, Masa: 0 },
+      U15_19: { label: "U15-U19 / Akademi & Yerel", Hakem: 525, Yardimci: 340, Dorduncu: 335, Gozlemci: 340, Masa: 0 },
+      U14: { label: "U10-U14 / Akademi & Yerel", Hakem: 475, Yardimci: 290, Dorduncu: 280, Gozlemci: 290, Masa: 0 },
+      FUTSAL: { label: "Futsal / Plaj / Hali Saha", Hakem: 340, Yardimci: 265, Dorduncu: 0, Gozlemci: 265, Masa: 300 },
+      WOMEN_SUPER: { label: "Kadınlar Süper / TFF Futsal", Hakem: 790, Yardimci: 420, Dorduncu: 395, Gozlemci: 420, Masa: 525 },
+      REGIONAL_AMATEUR: { label: "Bölgesel Amatör Lig (örnek)", Hakem: 1470, Yardimci: 890, Dorduncu: 735, Gozlemci: 735, Masa: 0 },
+    };
+
+    const ROLE_KEYS = ['Hakem','Yardimci','Dorduncu','Gozlemci','Masa'];
+
+    /**************************************************************************
+     * MÜZİK LİSTESİ - örnek/test mp3'ler
+     **************************************************************************/
+    const MUSIC_TRACKS = [
+      { title: "Track 01 - SoundHelix", url: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3" },
+      { title: "Track 02 - SoundHelix", url: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-2.mp3" },
+      { title: "Track 03 - SoundHelix", url: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-3.mp3" },
+      { title: "Track 04 - SoundHelix", url: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-4.mp3" },
+      { title: "Track 05 - SoundHelix", url: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-5.mp3" },
+      { title: "Track 06 - SoundHelix", url: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-6.mp3" },
+      { title: "Track 07 - SoundHelix", url: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-7.mp3" },
+      { title: "Track 08 - SoundHelix", url: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-8.mp3" },
+      { title: "Track 09 - SoundHelix", url: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-9.mp3" },
+      { title: "Track 10 - SoundHelix", url: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-10.mp3" },
+      { title: "Track 11 - SoundHelix", url: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-11.mp3" },
+      { title: "Track 12 - SoundHelix", url: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-12.mp3" },
+      { title: "Track 13 - SoundHelix", url: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-13.mp3" },
+      { title: "Track 14 - SoundHelix", url: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-14.mp3" },
+      { title: "Track 15 - SoundHelix", url: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-15.mp3" },
+    ];
+
+    /**************************************************************************
+     * Uygulama
+     **************************************************************************/
+    function App(){
+      const [matches, setMatches] = useState([]);
+      const [dayTravels, setDayTravels] = useState({}); 
+      const [results, setResults] = useState(null);
+      const [isMusicPanelOpen, setIsMusicPanelOpen] = useState(false); 
+
+      // Music player state + ref
+      const audioRef = useRef(null);
+      const [trackIndex, setTrackIndex] = useState(0);
+      const [isPlaying, setIsPlaying] = useState(false);
+      const [volume, setVolume] = useState(0.6);
+      const [muted, setMuted] = useState(false);
+
+      // Harcırah Hesaplama: Küsüratlı
+      function calculate(){
+        if (matches.length === 0) { setResults(null); return; }
+        
+        const enriched = matches.map(m => {
+          const cat = CATEGORY_ROLE_FEES[m.category];
+          const roleKey = m.role || 'Yardimci';
+          const fee = cat && cat[roleKey] != null ? Number(cat[roleKey]) : 0;
+          return { ...m, matchFee: fee };
+        });
+
+        const byDate = {};
+        enriched.forEach(m => {
+          if (!m.date) return;
+          if (!byDate[m.date]) byDate[m.date] = [];
+          byDate[m.date].push(m);
+        });
+
+        const dayResults = [];
+        Object.entries(byDate).forEach(([date, dayMatches]) => {
+          let highest = dayMatches[0];
+          for (let dm of dayMatches) if (dm.matchFee > highest.matchFee) highest = dm;
+
+          const details = dayMatches.map(dm => {
+            // HARCIRAH KÜSÜRATLI: matchFee * 1.5 ve virgülden sonra 2 hane
+            const harc = dm.id === highest.id ? +(dm.matchFee * 1.5).toFixed(2) : 0; 
+            return { ...dm, harcirah: harc, lineTotal: +(dm.matchFee + harc).toFixed(2) };
+          });
+
+          const travel = Number(dayTravels[date] ?? 250);
+          const dayTotal = details.reduce((s,x) => s + x.lineTotal, 0) + travel;
+          dayResults.push({ date, matches: details, travel, dayTotal: +dayTotal.toFixed(2) });
+        });
+
+        const grandTotal = dayResults.reduce((s,d) => s + d.dayTotal, 0);
+        setResults({ dayResults, grandTotal: +grandTotal.toFixed(2) });
+      }
+
+      // Diğer fonksiyonlar...
+      useEffect(() => {
+        const a = audioRef.current;
+        if (!a) return;
+        a.volume = volume;
+        a.muted = muted;
+        const onEnded = () => { a.pause(); setIsPlaying(false); a.currentTime = 0; };
+        a.addEventListener('ended', onEnded);
+        return () => a.removeEventListener('ended', onEnded);
+      }, [trackIndex, volume, muted]);
+
+      function addMatch(){
+        setMatches(prev => [...prev, { id: Date.now(), date:'', category: Object.keys(CATEGORY_ROLE_FEES)[0], role: 'Yardimci' }]);
+      }
+      function updateMatch(id, field, value){
+        setMatches(prev => prev.map(m => m.id===id ? { ...m, [field]: value } : m));
+      }
+      function removeMatch(id){
+        setMatches(prev => prev.filter(m => m.id !== id));
+      }
+
+      const uniqueDates = useMemo(() => {
+        const s = Array.from(new Set(matches.map(m=>m.date).filter(Boolean)));
+        s.sort();
+        return s;
+      }, [matches]);
+
+      function setTravelForDate(date, value){
+        setDayTravels(prev => ({ ...prev, [date]: Number(value || 0) }));
+      }
+      
+      // MUSIC CONTROLS
+      function playPause(){
+        const a = audioRef.current;
+        if (!a) return;
+        if (isPlaying){ a.pause(); setIsPlaying(false); }
+        else { a.play().then(()=> setIsPlaying(true)).catch(()=>{/* user gesture needed */}); }
+      }
+      function stopAudio(){
+        const a = audioRef.current;
+        if (!a) return;
+        a.pause(); a.currentTime = 0; setIsPlaying(false);
+      }
+      function prevTrack(){
+        stopAudio();
+        setTrackIndex(i => (i-1+MUSIC_TRACKS.length) % MUSIC_TRACKS.length);
+      }
+      function nextTrack(){
+        stopAudio();
+        setTrackIndex(i => (i+1) % MUSIC_TRACKS.length);
+      }
+      useEffect(()=> {
+        const a = audioRef.current;
+        if (!a) return;
+        a.src = MUSIC_TRACKS[trackIndex].url;
+        a.load();
+      }, [trackIndex]);
+
+      useEffect(()=> {
+        const a = audioRef.current;
+        if (!a) return;
+        a.volume = volume;
+        a.muted = muted;
+      }, [volume, muted]);
+
+      return (
+        <div className="min-h-screen p-6">
+
+          {/* Müzik Çalar Açma Butonu */}
+          <button 
+            onClick={() => setIsMusicPanelOpen(true)} 
+            className="music-button p-3 rounded-full bg-amber-500 hover:bg-amber-600 shadow-xl transition-all"
+            title="Müzik Çaları Aç"
+          >
+            {isPlaying ? '🎶' : '▶️'}
+          </button>
+
+          {/* Müzik Çalar Paneli (Drawer) */}
+          <div className={`music-panel ${isMusicPanelOpen ? 'open' : ''}`}>
+            <div className="relative pb-4 border-b border-gray-700"> 
+                <h3 className="text-xl font-bold text-amber-300">Müzik Çalar</h3>
+                <button 
+                    onClick={() => setIsMusicPanelOpen(false)} 
+                    className="close-button p-2 bg-red-600 rounded-full hover:bg-red-700 transition"
+                    title="Müzik Çaları Kapat"
+                >
+                    &times;
+                </button>
+            </div>
+            
+            <div className="mt-4 p-3 bg-gray-800/70 rounded-xl shadow-md">
+                <div className="flex items-center gap-2">
+                    <div className="flex-1">
+                        <div className="text-xs text-gray-300">Şu An Çalan</div>
+                        <div className="text-sm font-semibold text-amber-300 truncate">{MUSIC_TRACKS[trackIndex].title}</div>
+                    </div>
+                    <div className="flex items-center gap-1">
+                        <button onClick={prevTrack} className="px-2 py-1 bg-gray-700 rounded hover:bg-gray-600 transition">◀◀</button>
+                        <button onClick={playPause} className="px-2 py-1 bg-green-600 rounded hover:bg-green-500 transition">{isPlaying ? '❚❚' : '▶'}</button>
+                        <button onClick={stopAudio} className="px-2 py-1 bg-red-600 rounded hover:bg-red-500 transition">■</button>
+                        <button onClick={nextTrack} className="px-2 py-1 bg-gray-700 rounded hover:bg-gray-600 transition">▶▶</button>
+                    </div>
+                </div>
+                <div className="mt-4 flex items-center gap-2">
+                    <input type="range" min="0" max="1" step="0.01" value={volume} onChange={(e)=> setVolume(Number(e.target.value))} className="w-full" />
+                    <button onClick={()=> setMuted(!muted)} className="ml-2 px-2 py-1 bg-gray-700 rounded hover:bg-gray-600 transition">{muted ? '🔈' : '🔊'}</button>
+                </div>
+                <div className="mt-2 text-xs text-gray-400">Parça bittiğinde otomatik sonraki çalmayacak; önceki/sonraki ile değiştir.</div>
+                <audio ref={audioRef} />
+            </div>
+
+            {/* Şarkı Listesi */}
+            <div className="mt-6">
+                <h4 className="text-lg font-semibold text-gray-200 mb-2">Çalma Listesi</h4>
+                <ul className="space-y-1 text-sm">
+                    {MUSIC_TRACKS.map((track, index) => (
+                        <li 
+                            key={index} 
+                            onClick={() => { stopAudio(); setTrackIndex(index); }} 
+                            className={`p-2 rounded cursor-pointer transition ${index === trackIndex ? 'bg-amber-500/30 text-amber-100 font-bold' : 'bg-gray-700/50 hover:bg-gray-700'}`}
+                        >
+                            {index === trackIndex && isPlaying ? '▶ ' : ''} {track.title}
+                        </li>
+                    ))}
+                </ul>
+            </div>
+          </div>
+          
+          <div className="max-w-6xl mx-auto relative z-10">
+            {/* Main card */}
+            <div className="bg-gradient-to-br from-slate-800/80 to-gray-900/80 p-6 rounded-3xl shadow-2xl border border-gray-800">
+              <div className="flex flex-col md:flex-row gap-6">
+                <div className="md:w-2/3">
+                  <h1 className="text-3xl font-extrabold text-amber-300 mb-2">Hakem Kazanç Hesaplama</h1>
+                  <p className="text-sm text-gray-300 mb-4">PDF'e göre rol + kategori ücretleri uygulandı. Her gün için **en yüksek maç ücreti** olan maça harcırah = **maç ücreti $\times$ 1.5** uygulanır (küsüratlı). Diğer maçlarda harcırah yok. Her gün için yol ücreti gir.</p>
+
+                  <div className="flex flex-wrap gap-2 mb-4">
+                    <button onClick={addMatch} className="px-4 py-2 rounded-lg bg-amber-500 hover:bg-amber-600 transition">Maç Ekle</button>
+                    <button onClick={calculate} className="px-4 py-2 rounded-lg bg-green-600 hover:bg-green-700 transition">Hesapla</button>
+                    <button onClick={()=>{ setMatches([]); setResults(null); setDayTravels({}); }} className="px-4 py-2 rounded-lg bg-red-600 hover:bg-red-700 transition">Temizle</button>
+                  </div>
+
+                  {/* Matches list */}
+                  <div className="space-y-3">
+                    {matches.length === 0 && <div className="text-gray-400">Henüz maç yok. "Maç Ekle" butonuna basın.</div>}
+                    {matches.map(m => (
+                      <div key={m.id} className="bg-gray-800/60 p-3 rounded-xl flex flex-wrap items-center gap-2">
+                        <input type="date" value={m.date} onChange={e=> updateMatch(m.id,'date', e.target.value)} className="bg-gray-700 rounded px-2 py-1 flex-1 min-w-[120px]" />
+                        <select value={m.category} onChange={e=> updateMatch(m.id,'category', e.target.value)} className="bg-gray-700 rounded px-2 py-1 flex-1 min-w-[180px]">
+                          {Object.entries(CATEGORY_ROLE_FEES).map(([k,v]) => <option key={k} value={k}>{v.label}</option>)}
+                        </select>
+                        <select value={m.role} onChange={e=> updateMatch(m.id,'role', e.target.value)} className="bg-gray-700 rounded px-2 py-1 flex-1 min-w-[100px]">
+                          {ROLE_KEYS.map(r => <option key={r} value={r}>{r}</option>)}
+                        </select>
+                        <div className="ml-auto flex items-center gap-2">
+                          <button onClick={()=> removeMatch(m.id)} className="px-3 py-1 bg-red-600 rounded hover:bg-red-700 transition">Sil</button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Day travel inputs */}
+                  {uniqueDates.length > 0 && (
+                    <div className="mt-4 bg-gray-800/50 p-3 rounded-xl">
+                      <div className="font-semibold text-amber-300 mb-2">Gün Bazlı Yol Ücretleri (Varsayılan 250₺)</div>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                        {uniqueDates.map(d => (
+                          <div key={d} className="flex items-center gap-2 bg-gray-700 rounded p-2">
+                            <div className="w-36 text-sm font-medium">{d}</div>
+                            <input type="number" defaultValue={250} value={dayTravels[d] ?? 250} onChange={e=> setTravelForDate(d, e.target.value)} className="bg-gray-600 rounded px-2 py-1 w-full" />
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Right column: info & results */}
+                <div className="md:w-1/3">
+                  <div className="bg-gray-900/60 p-4 rounded-2xl sticky top-4">
+                    <h3 className="font-semibold text-amber-300 mb-2">Ücret Tablosu (Özet)</h3>
+                    <div className="text-sm text-gray-300 space-y-2 max-h-96 overflow-y-auto">
+                      {Object.entries(CATEGORY_ROLE_FEES).map(([k,v])=> (
+                        <div key={k} className="text-xs border-b border-gray-700 pb-1">
+                          <div className="font-semibold text-amber-200">{v.label}</div>
+                          <div className="text-gray-400 mt-1">
+                            {ROLE_KEYS.map(r=> (<span key={r} className="mr-2 whitespace-nowrap">{r}: <span className="font-medium text-gray-300">{v[r] !== undefined ? v[r] + '₺' : '-'}</span> </span>))}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Results quick view */}
+                  <div className="mt-4 bg-gray-900/60 p-4 rounded-2xl">
+                    <h3 className="font-semibold text-amber-300 mb-2">Hızlı Sonuç</h3>
+                    {results ? (
+                      <div className="text-sm text-gray-200 space-y-2">
+                        <div>Gün sayısı: <span className="font-bold">{results.dayResults.length}</span></div>
+                        <div className="text-lg font-extrabold text-amber-300 border-t border-gray-700 pt-2 mt-2">Genel Toplam: <span className="text-3xl">{results.grandTotal.toFixed(2)} ₺</span></div>
+                        <div className="mt-2 flex gap-2">
+                          <button onClick={()=> { navigator.clipboard && navigator.clipboard.writeText(JSON.stringify(results)); alert('Sonuçlar clipboard\'a kopyalandı (JSON).'); }} className="px-3 py-1 bg-amber-500 rounded hover:bg-amber-600 transition text-xs">Kopyala (JSON)</button>
+                          <button onClick={()=> downloadCSV(results)} className="px-3 py-1 bg-green-600 rounded hover:bg-green-700 transition text-xs">İndir (CSV)</button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="text-gray-400 text-sm">Hesaplama yapılmadı. "Hesapla" butonuna basınız.</div>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* Detailed results block */}
+              {results && (
+                <div className="mt-6">
+                  <h2 className="text-lg font-bold text-amber-300 mb-3 border-t border-gray-700 pt-4">Detaylı Gün Dökümü</h2>
+                  <div className="space-y-4">
+                    {results.dayResults.map(day => (
+                      <div key={day.date} className="bg-gray-800/60 p-4 rounded-lg shadow-md">
+                        <div className="flex justify-between items-center mb-2 border-b border-gray-700 pb-2">
+                          <div className="font-extrabold text-amber-200 text-xl">{day.date}</div>
+                          <div className="text-md text-green-300 font-bold">Gün Toplamı: {day.dayTotal.toFixed(2)} ₺</div>
+                        </div>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+                          {day.matches.map((m,i) => (
+                            <div key={i} className={`p-3 rounded border ${m.harcirah > 0 ? 'border-amber-500 bg-gray-900/70' : 'border-gray-700 bg-gray-900/50'}`}>
+                              <div className="text-sm text-gray-300">Kategori: <span className="font-semibold text-amber-300">{CATEGORY_ROLE_FEES[m.category].label.split(' / ')[0]}</span></div>
+                              <div className="text-sm text-gray-400">Rol: <span className="font-medium">{m.role}</span></div>
+                              <div className="text-sm text-gray-400">Maç Ücreti: <span className="font-medium">{m.matchFee} ₺</span></div>
+                              <div className="text-sm text-gray-400">Harcırah: <span className={`font-semibold ${m.harcirah > 0 ? 'text-green-400' : 'text-gray-500'}`}>{m.harcirah.toFixed(2)} ₺</span></div>
+                              <div className="text-sm text-gray-200 font-bold mt-1 border-t border-gray-800 pt-1">Satır Toplamı: <span className="text-amber-300">{(m.matchFee + m.harcirah).toFixed(2)} ₺</span></div>
+                            </div>
+                          ))}
+                        </div>
+                        <div className="mt-3 text-md text-gray-300 border-t border-gray-700 pt-2">Günlük Yol Ücreti: <span className="font-semibold text-amber-300">{day.travel} ₺</span></div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <div className="mt-6 text-xs text-gray-500 border-t border-gray-800 pt-3">Not: Kullanılan ücretler PDF tablosuna göre kod içine aktarılmıştır. PDF'de farklı satır / rol görüyorsan bana bildir, anında güncellerim.</div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    /**************************************************************************
+     * CSV İNDİRME (basit)
+     **************************************************************************/
+    function downloadCSV(results){
+      if (!results) { alert('Önce hesapla.'); return; }
+      let rows = [['Tarih','Kategori','Rol','Maç Ücreti','Harcırah','Satır Toplamı','Günlük Yol Ücreti','Gün Toplamı']];
+      results.dayResults.forEach(day => {
+        day.matches.forEach(m => {
+          rows.push([ day.date, CATEGORY_ROLE_FEES[m.category].label.replace(/,/g, ''), m.role, m.matchFee, m.harcirah.toFixed(2), (m.matchFee+m.harcirah).toFixed(2), day.travel, day.dayTotal.toFixed(2) ]);
+        });
+      });
+      rows.push([]);
+      rows.push(['Genel Toplam', results.grandTotal.toFixed(2)]);
+      const csvContent = rows.map(r => r.map(field => `"${String(field).replace(/\"/g,'""')}"`).join(',')).join('\n');
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'hakem_kazanc_hesaplama.csv';
+      a.click();
+      URL.revokeObjectURL(url);
+    }
+
+    // render
+    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+  </script>
+</body>
+</html>
